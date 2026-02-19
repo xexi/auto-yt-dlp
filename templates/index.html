@@ -1,0 +1,207 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>auto-yt-dlp</title>
+    <link rel="stylesheet" href="/static/style.css">
+</head>
+<body>
+<div class="container">
+    <h1><span>auto</span>-yt-dlp</h1>
+
+    <div class="error" id="error"></div>
+
+    <div class="input-group">
+        <input type="text" id="url" placeholder="Paste YouTube URL here..." autofocus>
+        <button class="btn btn-primary" id="fetchBtn" onclick="fetchInfo()">Fetch</button>
+    </div>
+
+    <div class="status" id="status"><span class="spinner"></span><span id="statusText">Fetching video info...</span></div>
+
+    <div class="preview" id="preview">
+        <img id="thumb" src="" alt="">
+        <div class="preview-info">
+            <h2 id="title"></h2>
+            <p class="meta"><span id="channel"></span> &middot; <span id="duration"></span></p>
+        </div>
+    </div>
+
+    <div class="options" id="options">
+        <div class="option-row">
+            <label>Format</label>
+            <div class="format-toggle" id="formatToggle">
+                <button class="active" onclick="setFormat('mp4')">MP4 Video</button>
+                <button onclick="setFormat('mp3')">MP3 Audio</button>
+                <button onclick="setFormat('sub_only')">Subtitles Only</button>
+            </div>
+        </div>
+
+        <div class="option-row" id="qualityRow">
+            <label>Quality</label>
+            <select id="quality"></select>
+        </div>
+
+        <div class="option-row" id="subsRow">
+            <label>Subtitles</label>
+            <div class="sub-tab-toggle" id="subTabs">
+                <button class="active" onclick="setSubTab('manual')">Manual</button>
+                <button onclick="setSubTab('auto')">Auto-generated</button>
+            </div>
+            <div class="sub-list" id="subList"></div>
+        </div>
+
+        <div class="option-row">
+            <div class="download-actions">
+                <button class="btn btn-primary" id="dlBtn" onclick="startDownload()">Download</button>
+            </div>
+        </div>
+    </div>
+</div>
+
+<script>
+let videoData = null;
+let currentFormat = 'mp4';
+let currentSubTab = 'manual';
+
+const $ = id => document.getElementById(id);
+
+function showError(msg) {
+    $('error').textContent = msg;
+    $('error').classList.add('show');
+}
+function hideError() { $('error').classList.remove('show'); }
+function showStatus(msg) { $('statusText').textContent = msg; $('status').classList.add('show'); }
+function hideStatus() { $('status').classList.remove('show'); }
+
+function formatDuration(s) {
+    if (!s) return '';
+    const h = Math.floor(s / 3600);
+    const m = Math.floor((s % 3600) / 60);
+    const sec = s % 60;
+    if (h > 0) return `${h}:${String(m).padStart(2,'0')}:${String(sec).padStart(2,'0')}`;
+    return `${m}:${String(sec).padStart(2,'0')}`;
+}
+
+async function fetchInfo() {
+    const url = $('url').value.trim();
+    if (!url) return;
+
+    hideError();
+    $('preview').classList.remove('show');
+    $('options').classList.remove('show');
+    $('fetchBtn').disabled = true;
+    showStatus('Fetching video info...');
+
+    try {
+        const res = await fetch('/api/info', {
+            method: 'POST',
+            headers: {'Content-Type': 'application/json'},
+            body: JSON.stringify({ url }),
+        });
+        const data = await res.json();
+        if (!res.ok) throw new Error(data.error || 'Failed');
+
+        videoData = data;
+        $('thumb').src = data.thumbnail || '';
+        $('title').textContent = data.title || '';
+        $('channel').textContent = data.channel || '';
+        $('duration').textContent = formatDuration(data.duration);
+
+        // Populate quality dropdown
+        const sel = $('quality');
+        sel.innerHTML = '<option value="best">Best available</option>';
+        (data.qualities || []).reverse().forEach(q => {
+            sel.innerHTML += `<option value="${q}">${q}</option>`;
+        });
+
+        $('preview').classList.add('show');
+        $('options').classList.add('show');
+        setFormat('mp4');
+        setSubTab('manual');
+    } catch (e) {
+        showError(e.message);
+    } finally {
+        hideStatus();
+        $('fetchBtn').disabled = false;
+    }
+}
+
+function setFormat(fmt) {
+    currentFormat = fmt;
+    document.querySelectorAll('#formatToggle button').forEach((b, i) => {
+        b.classList.toggle('active', (i === 0 && fmt === 'mp4') || (i === 1 && fmt === 'mp3') || (i === 2 && fmt === 'sub_only'));
+    });
+    $('qualityRow').style.display = fmt === 'mp4' ? '' : 'none';
+    $('subsRow').style.display = fmt === 'mp3' ? 'none' : '';
+}
+
+function setSubTab(tab) {
+    currentSubTab = tab;
+    document.querySelectorAll('#subTabs button').forEach((b, i) => {
+        b.classList.toggle('active', (i === 0 && tab === 'manual') || (i === 1 && tab === 'auto'));
+    });
+    const langs = tab === 'manual' ? (videoData?.subtitle_langs || []) : (videoData?.auto_subtitle_langs || []);
+    const list = $('subList');
+    if (langs.length === 0) {
+        list.innerHTML = '<span style="color:#666;font-size:0.85rem">No subtitles available</span>';
+        return;
+    }
+    list.innerHTML = langs.map(l =>
+        `<label><input type="checkbox" name="sub" value="${l}"><span>${l}</span></label>`
+    ).join('');
+}
+
+async function startDownload() {
+    const url = $('url').value.trim();
+    if (!url) return;
+
+    const selectedSubs = [...document.querySelectorAll('#subList input:checked')].map(el => el.value);
+
+    const body = {
+        url,
+        format: currentFormat,
+        quality: $('quality').value,
+        subtitles: selectedSubs,
+        sub_type: currentSubTab,
+    };
+
+    hideError();
+    $('dlBtn').disabled = true;
+    showStatus('Downloading... this may take a moment');
+
+    try {
+        const res = await fetch('/api/download', {
+            method: 'POST',
+            headers: {'Content-Type': 'application/json'},
+            body: JSON.stringify(body),
+        });
+
+        if (!res.ok) {
+            const err = await res.json();
+            throw new Error(err.error || 'Download failed');
+        }
+
+        const blob = await res.blob();
+        const cd = res.headers.get('Content-Disposition') || '';
+        const match = cd.match(/filename\*?=(?:UTF-8'')?["']?([^"';\n]+)/i);
+        const filename = match ? decodeURIComponent(match[1]) : 'download';
+
+        const a = document.createElement('a');
+        a.href = URL.createObjectURL(blob);
+        a.download = filename;
+        a.click();
+        URL.revokeObjectURL(a.href);
+    } catch (e) {
+        showError(e.message);
+    } finally {
+        hideStatus();
+        $('dlBtn').disabled = false;
+    }
+}
+
+// Allow Enter key to fetch
+$('url').addEventListener('keydown', e => { if (e.key === 'Enter') fetchInfo(); });
+</script>
+</body>
+</html>
