@@ -162,9 +162,10 @@ def ensure_ytdlp():
             exit(1)
 
 
+ensure_ytdlp()
+if not shutil.which("ffmpeg"):
+    print("WARNING: ffmpeg not found — MP3 conversion and video merging may fail")
+print(f"yt-dlp binary: {YTDLP}")
+
 if __name__ == "__main__":
-    ensure_ytdlp()
-    if not shutil.which("ffmpeg"):
-        print("WARNING: ffmpeg not found — MP3 conversion and video merging may fail")
-    print(f"yt-dlp binary: {YTDLP}")
     app.run(debug=True, port=5000)
