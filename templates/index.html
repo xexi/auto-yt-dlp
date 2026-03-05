@@ -115,10 +115,25 @@ async function fetchInfo() {
             sel.innerHTML += `<option value="${q}">${q}</option>`;
         });
 
+        // Check subtitle availability
+        const hasSubs = (data.subtitle_langs?.length > 0) || (data.auto_subtitle_langs?.length > 0);
+        const hasManual = data.subtitle_langs?.length > 0;
+        const hasAuto = data.auto_subtitle_langs?.length > 0;
+
+        // Show/hide "Subtitles Only" format button
+        document.querySelectorAll('#formatToggle button')[2].style.display = hasSubs ? '' : 'none';
+
+        // Show/hide subtitle row
+        $('subsRow').style.display = hasSubs ? '' : 'none';
+
+        // Hide unavailable sub tabs
+        document.querySelectorAll('#subTabs button')[0].style.display = hasManual ? '' : 'none';
+        document.querySelectorAll('#subTabs button')[1].style.display = hasAuto ? '' : 'none';
+
         $('preview').classList.add('show');
         $('options').classList.add('show');
         setFormat('mp4');
-        setSubTab('manual');
+        setSubTab(hasManual ? 'manual' : hasAuto ? 'auto' : 'manual');
     } catch (e) {
         showError(e.message);
     } finally {
@@ -133,7 +148,8 @@ function setFormat(fmt) {
         b.classList.toggle('active', (i === 0 && fmt === 'mp4') || (i === 1 && fmt === 'mp3') || (i === 2 && fmt === 'sub_only'));
     });
     $('qualityRow').style.display = fmt === 'mp4' ? '' : 'none';
-    $('subsRow').style.display = fmt === 'mp3' ? 'none' : '';
+    const hasSubs = (videoData?.subtitle_langs?.length > 0) || (videoData?.auto_subtitle_langs?.length > 0);
+    $('subsRow').style.display = (fmt === 'sub_only' && hasSubs) ? '' : 'none';
 }
 
 function setSubTab(tab) {

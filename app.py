@@ -56,7 +56,14 @@ def video_info():
     subs = data.get("subtitles", {})
     auto_subs = data.get("automatic_captions", {})
     sub_langs = sorted(subs.keys())
-    auto_sub_langs = sorted(set(auto_subs.keys()) - set(sub_langs))
+
+    # Only include the video's original language for auto-captions
+    # (other languages are auto-translated and often fail with 429)
+    video_lang = (data.get("language") or "").split("-")[0]  # "en-US" -> "en"
+    auto_sub_langs = sorted(
+        lang for lang in auto_subs
+        if lang == video_lang and lang not in subs
+    )
 
     return jsonify(
         title=data.get("title"),
