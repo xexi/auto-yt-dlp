@@ -93,10 +93,18 @@ def download():
 
     output_template = str(job_dir / "%(title)s.%(ext)s")
 
+    # Network resilience flags to handle YouTube throttling
+    net_opts = [
+        "--retries", "30",
+        "--fragment-retries", "30",
+        "--retry-sleep", "exp=1:20",
+        "--http-chunk-size", "10M",
+    ]
+
     try:
         if fmt == "mp3":
             cmd = [
-                str(YTDLP), "-x", "--audio-format", "mp3",
+                str(YTDLP), *net_opts, "-x", "--audio-format", "mp3",
                 "-o", output_template, url,
             ]
         else:
@@ -106,7 +114,7 @@ def download():
                 h = quality.replace("p", "")
                 fmt_spec = f"bestvideo[height<={h}]+bestaudio/best[height<={h}]"
             cmd = [
-                str(YTDLP), "-f", fmt_spec,
+                str(YTDLP), *net_opts, "-f", fmt_spec,
                 "--merge-output-format", "mp4",
                 "-o", output_template, url,
             ]
@@ -121,12 +129,12 @@ def download():
             langs = ",".join(subtitles)
             sub_flags = ["--write-auto-sub"] if sub_type == "auto" else ["--write-sub"]
             cmd = [
-                str(YTDLP), *sub_flags, "--sub-lang", langs,
+                str(YTDLP), *net_opts, *sub_flags, "--sub-lang", langs,
                 "--sub-format", "srt/best", "--convert-subs", "srt",
                 "--skip-download", "-o", output_template, url,
             ]
 
-        result = subprocess.run(cmd, capture_output=True, text=True, timeout=300)
+        result = subprocess.run(cmd, capture_output=True, text=True, timeout=600)
         if result.returncode != 0:
             cleanup_dir(job_dir)
             return jsonify(error=result.stderr.strip() or "Download failed"), 500

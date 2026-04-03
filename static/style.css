@@ -158,18 +158,30 @@ h1 span { color: #ff4444; }
     color: #fff;
 }
 
-/* Select / dropdown */
-select {
-    width: 100%;
-    padding: 10px 12px;
-    border-radius: 8px;
-    border: 1px solid #333;
+/* Quality toggle */
+.quality-toggle {
+    display: flex;
+    gap: 4px;
     background: #111;
-    color: #fff;
+    border-radius: 8px;
+    padding: 4px;
+}
+
+.quality-toggle button {
+    flex: 1;
+    padding: 8px;
+    border-radius: 6px;
+    border: none;
+    background: transparent;
+    color: #888;
     font-size: 0.9rem;
-    outline: none;
-    appearance: none;
     cursor: pointer;
+    transition: all 0.2s;
+}
+
+.quality-toggle button.active {
+    background: #ff4444;
+    color: #fff;
 }
 
 /* Subtitle checkboxes */
