@@ -1,0 +1,131 @@
+#!/usr/bin/env bash
+set -euo pipefail
+
+# aytdlp — start/stop the auto-yt-dlp Flask app as a detached background server.
+# State lives in ~/.aytdlp/ (run.pid, port, log). Works in place or symlinked to ~/bin.
+
+resolve() {
+  local p="$1" t
+  while [ -L "$p" ]; do
+    t="$(readlink "$p")"
+    case "$t" in
+      /*) p="$t" ;;
+      *)  p="$(cd "$(dirname "$p")" && cd "$(dirname "$t")" && pwd)/$(basename "$t")" ;;
+    esac
+  done
+  printf '%s' "$p"
+}
+
+SELF="$(resolve "${BASH_SOURCE[0]}")"
+SCRIPT_DIR="$(cd "$(dirname "$SELF")" && pwd)"
+REPO_DIR="$(cd "$SCRIPT_DIR/.." && pwd)"
+
+PYTHON="$REPO_DIR/venv/bin/python"
+APP="$REPO_DIR/app.py"
+
+STATE_DIR="$HOME/.aytdlp"
+PID_FILE="$STATE_DIR/run.pid"
+PORT_FILE="$STATE_DIR/port"
+LOG_FILE="$STATE_DIR/log"
+mkdir -p "$STATE_DIR"
+
+# 0.0.0.0 binds every interface (LAN / Tailscale) but isn't browsable as a host;
+# default to loopback and map 0.0.0.0 -> localhost for URLs.
+HOST="${AYTDLP_HOST:-127.0.0.1}"
+PORT="${AYTDLP_PORT:-5000}"
+url_host() { [ "$1" = "0.0.0.0" ] && echo "localhost" || echo "$1"; }
+
+is_running() {
+  [ -f "$PID_FILE" ] || return 1
+  local pid; pid="$(cat "$PID_FILE" 2>/dev/null)"
+  [ -n "$pid" ] && kill -0 "$pid" 2>/dev/null
+}
+
+read_port() { cat "$PORT_FILE" 2>/dev/null || echo "$PORT"; }
+
+cmd_start() {
+  if is_running; then
+    echo "already running on :$(read_port) (pid $(cat "$PID_FILE"))"
+    return 0
+  fi
+  if [ ! -x "$PYTHON" ]; then
+    echo "venv python missing: $PYTHON" >&2
+    echo "create it first:  python3 -m venv venv && venv/bin/pip install -r requirements.txt" >&2
+    exit 1
+  fi
+  : > "$LOG_FILE"
+  # exec so the backgrounded subshell *becomes* python — $! is then the real
+  # Flask pid (not a wrapper), so stop kills it instead of orphaning it.
+  # trap '' HUP survives exec, giving SIGHUP immunity without relying on nohup.
+  (
+    cd "$REPO_DIR" || exit 1
+    trap '' HUP
+    export YTDLP_WEB_HOST="$HOST" YTDLP_WEB_PORT="$PORT" YTDLP_WEB_DEBUG=0
+    exec "$PYTHON" "$APP" >>"$LOG_FILE" 2>&1 </dev/null
+  ) &
+  echo $! > "$PID_FILE"
+  echo "$PORT" > "$PORT_FILE"
+
+  local probe="http://$(url_host "$HOST"):$PORT/api/health"
+  local i
+  for i in $(seq 1 120); do
+    if curl -fsS "$probe" >/dev/null 2>&1; then
+      echo "started on http://$(url_host "$HOST"):$PORT (pid $(cat "$PID_FILE"))"
+      return 0
+    fi
+    if ! is_running; then
+      echo "failed to start — last log lines:" >&2
+      tail -n 20 "$LOG_FILE" >&2 || true
+      rm -f "$PID_FILE"
+      exit 1
+    fi
+    sleep 0.5
+  done
+  echo "started (pid $(cat "$PID_FILE")) but health check timed out — see $LOG_FILE" >&2
+}
+
+cmd_stop() {
+  if ! is_running; then
+    rm -f "$PID_FILE"
+    echo "not running"
+    return 0
+  fi
+  local pid i; pid="$(cat "$PID_FILE")"
+  kill "$pid" 2>/dev/null || true
+  for i in $(seq 1 25); do is_running || break; sleep 0.2; done
+  is_running && kill -9 "$pid" 2>/dev/null || true
+  rm -f "$PID_FILE"
+  echo "stopped"
+}
+
+cmd_status() {
+  if is_running; then
+    local pid port url
+    pid="$(cat "$PID_FILE")"; port="$(read_port)"
+    url="http://$(url_host "$HOST"):$port"
+    if [ "${1:-}" = "--json" ]; then
+      printf '{"running":true,"pid":%s,"port":%s,"url":"%s"}\n' "$pid" "$port" "$url"
+    else
+      echo "running on $url (pid $pid)"
+    fi
+  else
+    if [ "${1:-}" = "--json" ]; then echo '{"running":false}'; else echo "not running"; fi
+  fi
+}
+
+cmd_open() {
+  is_running || cmd_start
+  open "http://$(url_host "$HOST"):$(read_port)"
+}
+
+cmd_logs() { tail -n "${1:-40}" "$LOG_FILE" 2>/dev/null || echo "no log yet"; }
+
+case "${1:-status}" in
+  start)   cmd_start ;;
+  stop)    cmd_stop ;;
+  restart) cmd_stop; cmd_start ;;
+  status)  shift || true; cmd_status "${1:-}" ;;
+  open)    cmd_open ;;
+  logs)    shift || true; cmd_logs "${1:-}" ;;
+  *) echo "usage: aytdlp {start|stop|restart|status [--json]|open|logs [n]}" >&2; exit 1 ;;
+esac

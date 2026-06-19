@@ -30,6 +30,11 @@ def index():
     return render_template("index.html")
 
 
+@app.route("/api/health")
+def health():
+    return jsonify(ok=True)
+
+
 @app.route("/api/info", methods=["POST"])
 def video_info():
     url = request.json.get("url", "").strip()
@@ -183,4 +188,7 @@ if not shutil.which("ffmpeg"):
 print(f"yt-dlp binary: {YTDLP}")
 
 if __name__ == "__main__":
-    app.run(debug=True, port=5000)
+    host = os.environ.get("YTDLP_WEB_HOST", "127.0.0.1")
+    port = int(os.environ.get("YTDLP_WEB_PORT", "5000"))
+    debug = os.environ.get("YTDLP_WEB_DEBUG", "1") != "0"
+    app.run(host=host, port=port, debug=debug)

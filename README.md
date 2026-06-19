@@ -46,6 +46,42 @@ python app.py
 
 Open **http://localhost:5000** in your browser.
 
+## Run it like an app (macOS)
+
+For day-to-day use you don't want a terminal pinned open. The `aytdlp` helper runs
+the server detached and gives you a menubar toggle (via [SwiftBar](https://swiftbar.app)).
+
+```sh
+# one-time: symlink `aytdlp` into ~/bin and drop the SwiftBar plugin in place
+./scripts/install-local.sh
+```
+
+Then control it from anywhere:
+
+```sh
+aytdlp start            # boot the server in the background, wait until it's ready
+aytdlp status           # "running on http://127.0.0.1:5000 (pid …)"
+aytdlp open             # open the UI in your browser (starts it first if needed)
+aytdlp stop
+aytdlp restart
+aytdlp logs             # tail the server log
+```
+
+State (pid, port, log) lives in `~/.aytdlp/`. `aytdlp status --json` powers the menubar.
+
+**Menubar:** `brew install --cask swiftbar`, launch it, point it at a plugin folder
+(e.g. `~/SwiftBarPlugins`). `install-local.sh` copies `scripts/menubar/aytdlp.10s.sh`
+there for you — hit SwiftBar → **Refresh All**. The icon flips between idle and
+running, with Start / Stop / Restart / Open in Browser actions. If `aytdlp` lives
+somewhere unusual, set `AYTDLP_BIN` to its absolute path in the plugin's env.
+
+**Port / host:** defaults to `127.0.0.1:5000`. Override per-run with env vars —
+`AYTDLP_PORT=5050 aytdlp start`, or `AYTDLP_HOST=0.0.0.0 aytdlp start` to expose it on
+the LAN / Tailscale. Note: macOS's AirPlay Receiver also listens on `*:5000`; the
+app still works because it binds the more specific `127.0.0.1` (and `aytdlp open`
+uses that address), but `localhost:5000` may hit AirPlay instead — use `127.0.0.1`,
+pick another port, or turn off AirPlay Receiver in System Settings.
+
 ## How It Works
 
 1. Paste a YouTube URL and click **Fetch**
@@ -68,7 +104,11 @@ auto-yt-dlp/
 ├── static/
 │   └── style.css           # Styling
 ├── scripts/
-│   └── update_ytdlp.sh     # Fetches latest yt-dlp binary from GitHub
+│   ├── update_ytdlp.sh     # Fetches latest yt-dlp binary from GitHub
+│   ├── aytdlp              # start/stop/status control wrapper (detached server)
+│   ├── install-local.sh    # Links `aytdlp` into ~/bin + installs SwiftBar plugin
+│   └── menubar/
+│       └── aytdlp.10s.sh   # SwiftBar menubar plugin
 ├── bin/                    # yt-dlp binary lives here (auto-managed, gitignored)
 └── downloads/              # Temp files during download (auto-cleaned, gitignored)
 ```
