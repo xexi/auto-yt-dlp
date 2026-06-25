@@ -211,8 +211,18 @@ async function startDownload() {
 
         const blob = await res.blob();
         const cd = res.headers.get('Content-Disposition') || '';
-        const match = cd.match(/filename\*?=(?:UTF-8'')?["']?([^"';\n]+)/i);
-        const filename = match ? decodeURIComponent(match[1]) : 'download';
+        // Prefer RFC 5987 filename* (UTF-8 percent-encoded) so emoji and
+        // non-Latin titles survive; the plain filename= is an ASCII-only
+        // fallback that has those characters stripped out.
+        let filename = 'download';
+        const star = cd.match(/filename\*=(?:[^']*'[^']*')?([^;\n]+)/i);
+        const plain = cd.match(/filename="([^"]+)"/i) || cd.match(/filename=([^;\n]+)/i);
+        if (star) {
+            try { filename = decodeURIComponent(star[1].trim()); }
+            catch { filename = star[1].trim(); }
+        } else if (plain) {
+            filename = plain[1].trim();
+        }
 
         const a = document.createElement('a');
         a.href = URL.createObjectURL(blob);
