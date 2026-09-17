@@ -13,6 +13,9 @@ app = Flask(__name__)
 BASE_DIR = Path(__file__).resolve().parent
 YTDLP = BASE_DIR / "bin" / "yt-dlp"
 DOWNLOADS = BASE_DIR / "downloads"
+# Per-job scratch space. Anything here at startup is left over from a
+# download that was interrupted (server killed or restarted mid-job).
+shutil.rmtree(DOWNLOADS, ignore_errors=True)
 DOWNLOADS.mkdir(exist_ok=True)
 
 URL_RE = re.compile(
@@ -150,13 +153,16 @@ def download():
             cleanup_dir(job_dir)
             return jsonify(error="No output file produced"), 500
 
+        # Open the file, then delete the job dir right away: the open handle
+        # keeps the data readable until the response finishes streaming.
+        # (response.call_on_close never fires for send_file responses, which
+        # used to leave every download behind in downloads/.)
         out_file = files[0]
-        response = send_file(out_file, as_attachment=True, download_name=out_file.name)
-
-        @response.call_on_close
-        def _cleanup():
-            cleanup_dir(job_dir)
-
+        f = open(out_file, "rb")
+        size = os.fstat(f.fileno()).st_size
+        cleanup_dir(job_dir)
+        response = send_file(f, as_attachment=True, download_name=out_file.name)
+        response.content_length = size
         return response
 
     except subprocess.TimeoutExpired:
