@@ -8,7 +8,7 @@ Built with Flask and [yt-dlp](https://github.com/yt-dlp/yt-dlp). The app automat
 
 - **Video download** — MP4 with selectable quality (360p to 4K)
 - **Audio download** — Extract audio as MP3
-- **Subtitles** — Browse manual and auto-generated captions, pick languages, download as separate SRT files or embedded in video
+- **Subtitles** — Browse manual and auto-generated captions, pick languages, download as SRT files (zipped when several languages are picked) or embedded in video
 - **Auto-update** — yt-dlp binary is checked and updated every time the server starts
 - **Dark UI** — Clean, minimal interface that works on desktop and mobile
 
@@ -89,7 +89,7 @@ pick another port, or turn off AirPlay Receiver in System Settings.
 3. Choose your format:
    - **MP4 Video** — pick a quality (best, 1080p, 720p, etc.)
    - **MP3 Audio** — extracts and converts audio
-   - **Subtitles Only** — downloads caption files
+   - **Subtitles Only** — downloads caption files (one .srt, or a .zip for several languages)
 4. Optionally select subtitle languages to embed or download
 5. Click **Download** — the file is saved straight to your browser
 

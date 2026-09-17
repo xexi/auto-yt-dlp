@@ -4,6 +4,7 @@ import re
 import shutil
 import subprocess
 import uuid
+import zipfile
 from pathlib import Path
 
 from flask import Flask, jsonify, request, send_file, render_template
@@ -147,17 +148,28 @@ def download():
             cleanup_dir(job_dir)
             return jsonify(error=result.stderr.strip() or "Download failed"), 500
 
-        # Find the output file
-        files = list(job_dir.iterdir())
+        # Find the output file(s)
+        files = sorted(job_dir.iterdir())
         if not files:
             cleanup_dir(job_dir)
             return jsonify(error="No output file produced"), 500
+
+        if len(files) == 1:
+            out_file = files[0]
+        else:
+            # Several outputs (one .srt per language for subtitles-only):
+            # bundle them into a zip named after the shared title, e.g.
+            # "Title.en.srt" + "Title.ko.srt" -> "Title.zip".
+            title = os.path.commonprefix([p.name for p in files]).rsplit(".", 1)[0].strip()
+            out_file = job_dir / f"{title or 'download'}.zip"
+            with zipfile.ZipFile(out_file, "w", zipfile.ZIP_DEFLATED) as zf:
+                for p in files:
+                    zf.write(p, arcname=p.name)
 
         # Open the file, then delete the job dir right away: the open handle
         # keeps the data readable until the response finishes streaming.
         # (response.call_on_close never fires for send_file responses, which
         # used to leave every download behind in downloads/.)
-        out_file = files[0]
         f = open(out_file, "rb")
         size = os.fstat(f.fileno()).st_size
         cleanup_dir(job_dir)
