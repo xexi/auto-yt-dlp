@@ -24,6 +24,64 @@ URL_RE = re.compile(
 )
 
 
+def find_ffmpeg_dir():
+    """Directory holding ffmpeg/ffprobe, or None.
+
+    Launchers like SwiftBar start the app with a bare PATH that lacks
+    Homebrew's bin dir, so fall back to the usual install locations.
+    """
+    found = shutil.which("ffmpeg")
+    if found:
+        return Path(found).parent
+    for d in ("/opt/homebrew/bin", "/usr/local/bin"):
+        if (Path(d) / "ffmpeg").exists():
+            return Path(d)
+    return None
+
+
+FFMPEG_DIR = find_ffmpeg_dir()
+
+
+def stream_types(path: Path) -> set:
+    result = subprocess.run(
+        [str(FFMPEG_DIR / "ffprobe"), "-v", "error",
+         "-show_entries", "stream=codec_type", "-of", "csv=p=0", str(path)],
+        capture_output=True, text=True,
+    )
+    return set(result.stdout.split()) if result.returncode == 0 else set()
+
+
+def merge_split_streams(files: list) -> list:
+    """Mux a video-only + audio-only pair into a single mp4.
+
+    yt-dlp leaves "Title.f616.mp4" (video) and "Title.f251.webm" (audio)
+    side by side when it couldn't merge them itself. Returns the new file
+    list, or the original one if there's nothing to merge or muxing fails.
+    """
+    if not FFMPEG_DIR:
+        return files
+    types = {p: stream_types(p) for p in files}
+    video = next((p for p, t in types.items() if t == {"video"}), None)
+    audio = next((p for p, t in types.items() if t == {"audio"}), None)
+    if not video or not audio:
+        return files
+
+    title = re.sub(r"\.f[\w-]+$", "", video.stem)
+    out = video.with_name(f"{title}.mp4")
+    if out in (video, audio):
+        out = video.with_name(f"{title}.merged.mp4")
+    base = [str(FFMPEG_DIR / "ffmpeg"), "-y", "-v", "error",
+            "-i", str(video), "-i", str(audio), "-map", "0:v:0", "-map", "1:a:0"]
+    # Stream copy first; re-encode the audio to AAC if mp4 rejects the codec.
+    for codecs in (["-c", "copy"], ["-c:v", "copy", "-c:a", "aac"]):
+        if subprocess.run([*base, *codecs, str(out)], capture_output=True).returncode == 0:
+            video.unlink()
+            audio.unlink()
+            return sorted(p for p in files if p not in (video, audio)) + [out]
+    out.unlink(missing_ok=True)
+    return files
+
+
 def cleanup_dir(directory: Path):
     if directory.exists():
         shutil.rmtree(directory)
@@ -109,6 +167,8 @@ def download():
         "--retry-sleep", "exp=1:20",
         "--http-chunk-size", "10M",
     ]
+    if FFMPEG_DIR:
+        net_opts += ["--ffmpeg-location", str(FFMPEG_DIR)]
 
     try:
         if fmt == "mp3":
@@ -153,6 +213,9 @@ def download():
         if not files:
             cleanup_dir(job_dir)
             return jsonify(error="No output file produced"), 500
+
+        if fmt == "mp4" and len(files) > 1:
+            files = merge_split_streams(files)
 
         if len(files) == 1:
             out_file = files[0]
@@ -201,7 +264,7 @@ def ensure_ytdlp():
 
 
 ensure_ytdlp()
-if not shutil.which("ffmpeg"):
+if not FFMPEG_DIR:
     print("WARNING: ffmpeg not found — MP3 conversion and video merging may fail")
 print(f"yt-dlp binary: {YTDLP}")
 
