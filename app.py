@@ -1,18 +1,30 @@
+import io
 import json
 import os
 import re
 import shutil
 import subprocess
+import sys
 import uuid
 import zipfile
 from pathlib import Path
 
 from flask import Flask, jsonify, request, send_file, render_template
 
+# Detached launches (scripts/aytdlp.ps1 runs the server under pythonw, which
+# has no console) point this at their log file; everything printed or logged
+# from here on lands there.
+_log_path = os.environ.get("YTDLP_WEB_LOG")
+if _log_path:
+    sys.stdout = sys.stderr = open(_log_path, "a", buffering=1, encoding="utf-8", errors="replace")
+
 app = Flask(__name__)
 
 BASE_DIR = Path(__file__).resolve().parent
-YTDLP = BASE_DIR / "bin" / "yt-dlp"
+YTDLP = BASE_DIR / "bin" / ("yt-dlp.exe" if os.name == "nt" else "yt-dlp")
+# On Windows a console child would otherwise flash a window for every
+# yt-dlp / ffmpeg run when the server itself has no console (pythonw).
+SUBPROCESS_FLAGS = {"creationflags": subprocess.CREATE_NO_WINDOW} if os.name == "nt" else {}
 DOWNLOADS = BASE_DIR / "downloads"
 # Per-job scratch space. Anything here at startup is left over from a
 # download that was interrupted (server killed or restarted mid-job).
@@ -25,8 +37,24 @@ URL_RE = re.compile(
 
 
 def cleanup_dir(directory: Path):
-    if directory.exists():
-        shutil.rmtree(directory)
+    # Best effort: a file still held open (or being scanned by antivirus on
+    # Windows) must not turn into a second error; leftovers are wiped at startup.
+    shutil.rmtree(directory, ignore_errors=True)
+
+
+class JobFile(io.FileIO):
+    """Read-only file that removes its job directory once the response has
+    finished streaming (the WSGI server closes the file afterwards).
+    Deleting up front and relying on the open handle only works on POSIX;
+    Windows refuses to unlink an open file."""
+
+    def __init__(self, path: Path, job_dir: Path):
+        super().__init__(path, "rb")
+        self.job_dir = job_dir
+
+    def close(self):
+        super().close()
+        cleanup_dir(self.job_dir)
 
 
 @app.route("/")
@@ -47,7 +75,7 @@ def video_info():
 
     result = subprocess.run(
         [str(YTDLP), "--dump-json", "--no-download", url],
-        capture_output=True, text=True, timeout=30,
+        capture_output=True, text=True, timeout=30, **SUBPROCESS_FLAGS,
     )
     if result.returncode != 0:
         return jsonify(error=result.stderr.strip() or "Failed to fetch video info"), 500
@@ -143,7 +171,7 @@ def download():
                 "--skip-download", "-o", output_template, url,
             ]
 
-        result = subprocess.run(cmd, capture_output=True, text=True, timeout=600)
+        result = subprocess.run(cmd, capture_output=True, text=True, timeout=600, **SUBPROCESS_FLAGS)
         if result.returncode != 0:
             cleanup_dir(job_dir)
             return jsonify(error=result.stderr.strip() or "Download failed"), 500
@@ -166,13 +194,11 @@ def download():
                 for p in files:
                     zf.write(p, arcname=p.name)
 
-        # Open the file, then delete the job dir right away: the open handle
-        # keeps the data readable until the response finishes streaming.
-        # (response.call_on_close never fires for send_file responses, which
-        # used to leave every download behind in downloads/.)
-        f = open(out_file, "rb")
+        # JobFile deletes the job dir when the server closes it after
+        # streaming. (response.call_on_close never fires for send_file
+        # responses, which used to leave every download behind in downloads/.)
+        f = JobFile(out_file, job_dir)
         size = os.fstat(f.fileno()).st_size
-        cleanup_dir(job_dir)
         response = send_file(f, as_attachment=True, download_name=out_file.name)
         response.content_length = size
         return response
@@ -186,11 +212,15 @@ def download():
 
 
 def ensure_ytdlp():
-    update_script = BASE_DIR / "scripts" / "update_ytdlp.sh"
+    scripts = BASE_DIR / "scripts"
+    if os.name == "nt":
+        cmd = ["powershell", "-NoProfile", "-ExecutionPolicy", "Bypass",
+               "-File", str(scripts / "update_ytdlp.ps1")]
+    else:
+        cmd = ["bash", str(scripts / "update_ytdlp.sh")]
     print("Checking for yt-dlp updates...")
     result = subprocess.run(
-        ["bash", str(update_script)],
-        capture_output=True, text=True, timeout=60,
+        cmd, capture_output=True, text=True, timeout=60, **SUBPROCESS_FLAGS,
     )
     print(result.stdout.strip())
     if result.returncode != 0:

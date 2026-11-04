@@ -6,6 +6,7 @@ BIN_DIR="$SCRIPT_DIR/../bin"
 mkdir -p "$BIN_DIR"
 BIN_DIR="$(cd "$BIN_DIR" && pwd)"
 VERSION_FILE="$BIN_DIR/.ytdlp_version"
+BIN_NAME="yt-dlp"   # yt-dlp.exe when run from Git Bash on Windows, matching app.py
 API_URL="https://api.github.com/repos/yt-dlp/yt-dlp/releases/latest"
 
 # Detect platform
@@ -21,7 +22,7 @@ case "$OS" in
             *)       ASSET_NAME="yt-dlp_linux" ;;
         esac
         ;;
-    MINGW*|MSYS*|CYGWIN*) ASSET_NAME="yt-dlp.exe" ;;
+    MINGW*|MSYS*|CYGWIN*) ASSET_NAME="yt-dlp.exe"; BIN_NAME="yt-dlp.exe" ;;
     *) echo "Unsupported OS: $OS"; exit 1 ;;
 esac
 
@@ -29,7 +30,7 @@ echo "Fetching latest yt-dlp release info..."
 LATEST_TAG=$(curl -sL "$API_URL" | python3 -c "import sys,json; print(json.load(sys.stdin)['tag_name'])")
 
 # Check if already up to date
-if [ -f "$VERSION_FILE" ] && [ -f "$BIN_DIR/yt-dlp" ]; then
+if [ -f "$VERSION_FILE" ] && [ -f "$BIN_DIR/$BIN_NAME" ]; then
     CURRENT_VERSION=$(cat "$VERSION_FILE")
     if [ "$CURRENT_VERSION" = "$LATEST_TAG" ]; then
         echo "yt-dlp is already up to date ($CURRENT_VERSION)"
@@ -40,9 +41,9 @@ fi
 DOWNLOAD_URL="https://github.com/yt-dlp/yt-dlp/releases/download/${LATEST_TAG}/${ASSET_NAME}"
 
 echo "Downloading yt-dlp $LATEST_TAG ($ASSET_NAME)..."
-curl -sL "$DOWNLOAD_URL" -o "$BIN_DIR/yt-dlp"
-chmod +x "$BIN_DIR/yt-dlp"
+curl -sL "$DOWNLOAD_URL" -o "$BIN_DIR/$BIN_NAME"
+chmod +x "$BIN_DIR/$BIN_NAME"
 
 echo "$LATEST_TAG" > "$VERSION_FILE"
-echo "yt-dlp $LATEST_TAG installed to $BIN_DIR/yt-dlp"
-"$BIN_DIR/yt-dlp" --version
+echo "yt-dlp $LATEST_TAG installed to $BIN_DIR/$BIN_NAME"
+"$BIN_DIR/$BIN_NAME" --version
